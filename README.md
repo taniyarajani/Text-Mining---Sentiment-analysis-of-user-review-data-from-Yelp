@@ -1,4 +1,4 @@
-# Text-Mining---Sentiment-analysis-of-user-review-data-from-Yelp
+# Text-Mining---Sentiment-analysis-of-user-review-data-from-Yelp-in-R
 
 A sample of the original dataset (over 4 million review by over a million users for 144K businesses) will be used here. More details on the data are available from https://www.yelp.com/dataset_challenge. Effectiveness of different sentiment ‘dictionaries’ is examined, and developed and evaluated classification models to help predict sentiment polarity (negative, positive).
 
