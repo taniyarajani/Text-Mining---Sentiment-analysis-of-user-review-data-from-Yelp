@@ -1,0 +1,1088 @@
+---
+title: "Yelp sentiment analysis"
+author: "Taniya"
+date: "11/13/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r results=FALSE, cache=TRUE}
+rm(list = ls(all.names = TRUE)) 
+library('tidyverse')
+# Reading data
+resReviewsData <- read_csv2('yelpRestaurantReviews_sample.csv')
+```
+
+# Star ratings distribution
+```{r}
+#number of reviews by star-rating
+Star_count<- resReviewsData %>% group_by(stars) %>% count()
+
+#Using the star ratings to obtain a label indicating ‘positive’ or ‘negative’
+Stars_count1 <- resReviewsData %>% select(review_id, stars)%>% mutate(Sentiment=ifelse(stars<=3, "Negative", "Positive"))
+
+#plotting the data corresponding to star rating
+ggplot(Star_count, aes(stars, n, fill = stars)) + geom_bar(stat = "identity") + ggtitle("Star rating distribution") 
+
+# Star rating less than 3 should be considered negative and abone 3 should be considered positive, as there are more number of reviews for higher star ratings than for lower star ratings
+
+#hist(resReviewsData$stars)
+ggplot(resReviewsData, aes(x= funny, y=stars)) +geom_point()
+#funny is more prevalent in the reviews with higher star rating, as expected
+ggplot(resReviewsData, aes(x= cool, y=stars)) +geom_point()
+#cool is more prevalent in the reviews with higher star rating with some outliers, as expected
+ggplot(resReviewsData, aes(x= useful, y=stars)) +geom_point()
+#useful is more prevalent in the reviews with higher star rating with some outliers, this was not what was expected, as useful should be seen with every  star rating
+
+#The reviews distribution across locations
+resReviewsData %>%   group_by(state) %>% tally() %>% view()
+
+#checking the postal-codes`
+resReviewsData %>%   group_by(postal_code) %>% tally() %>% view()
+
+#keeping only the those reviews from 5-digit postal-codes  
+rrData <- resReviewsData %>% filter(str_detect(postal_code, "^[0-9]{1,5}"))
+```
+
+# Tokenization
+```{r message=FALSE , cache=TRUE}
+library(tidytext)
+library(SnowballC)
+library(textstem)
+
+#tokenizing the text of the reviews in the column named 'text'
+rrTokens <- rrData %>% unnest_tokens(word, text)
+
+#selecting just the review_id and the text column
+rrTokens <- rrData %>% select(review_id, stars, text ) %>% unnest_tokens(word, text)
+
+#Checking number of tokens(total words)
+rrTokens %>% distinct(word) %>% dim()
+#70321
+
+#removing stopwords
+rrTokens <- rrTokens %>% anti_join(stop_words)
+
+#Checking number of tokens again after removal of stop words 
+rrTokens %>% distinct(word) %>% dim()
+#69622
+
+#counting the total occurrences of different words & sorting by most frequent
+rrTokens %>% count(word, sort=TRUE) %>% top_n(10)
+
+#removing the words which are not present in at least 10 reviews
+rareWords <-rrTokens %>% count(word, sort=TRUE) %>% filter(n<10)
+
+#removing rare words from the data
+rmv_rare<-anti_join(rrTokens, rareWords)
+
+#checking the words
+rmv_rare %>% count(word, sort=TRUE) %>% view()
+
+#Among the least frequently occurring words are those starting with or including numbers (as in 6oz, 1.15 etc.), Removing these
+rmv_rare2<- rmv_rare %>% filter(str_detect(word,"[0-9]")==FALSE)
+rrTokens<- rmv_rare2
+
+#filtering out word like food, serive, time which doesn't not provide any sentiment meaning and that are present in too few or too many reviews
+
+#rrTokens <-rrTokens %>% select(review_id, stars, word) %>%filter(!word %in% c('food', 'service', 'time','foods', 'staff', 'salad', 'people','chicken','	restaurant','	menu','sauce','lunch','eat','staff','night','table','pizza','meal','salad','dinner','people','night','breakfast','times','burger','fried','day','husband','found','house','served','customer','hour','waistline','veteran','wife','business','manager','white','charlotte','walked','p.s','onion','water','salads','indian','add','stuff','guys','hours','arrived','	owned','chicago', 'fries','times', 'bit','location', 'rice', 'breakfast','fried', 'vegas', 'sandwich', 'day', 'lot', 'served', 'portions','restaurant' ))
+
+rrTokens %>% dplyr::count(word, sort=TRUE) %>% top_n(10)
+rrTokens %>% dplyr::count(word, sort=TRUE)
+```
+
+# Analyzing words by star ratings 
+```{r  message=FALSE , cache=TRUE}
+#Q.(b)
+#Checking words by star rating of reviews
+rrTokens %>% group_by(stars) %>% count(word, sort=TRUE) %>% arrange(desc(stars)) %>% view()
+
+#Proportion of word occurrence by star ratings
+ws <- rrTokens %>% group_by(stars) %>% count(word, sort=TRUE)
+ws<-  ws %>% group_by(stars) %>% mutate(prop=n/sum(n))
+
+#what are the most commonly used words by star rating
+ws %>% group_by(stars) %>% arrange(stars, desc(prop)) %>% view()
+
+#Top 20 words by star ratings
+ws %>% group_by(stars) %>% arrange(stars, desc(prop)) %>% filter(row_number()<=20L) %>% view()
+
+#plotting the top 20 words occuring in the different star ratings 
+ws %>% group_by(stars) %>% arrange(stars, desc(prop)) %>% filter(row_number()<=20L) %>% ggplot(aes(word, prop))+geom_col()+coord_flip()+facet_wrap((~stars))
+#food seems to be the most frequent term in star rating followed by service
+
+#separating plots by stars
+ws %>% filter(stars==1)  %>%  ggplot(aes(word, n)) + geom_col()+coord_flip()+ggtitle("Dstrbn of diff. words in star rating 1") 
+ws %>% filter(stars==2)  %>%  ggplot(aes(word, n)) + geom_col()+coord_flip()+ggtitle("Dstrbn of diff. words in star rating 2") 
+ws %>% filter(stars==3)  %>%  ggplot(aes(word, n)) + geom_col()+coord_flip()+ggtitle("Dstrbn of diff. words in star rating 3") 
+ws %>% filter(stars==4)  %>%  ggplot(aes(word, n)) + geom_col()+coord_flip()+ggtitle("Dstrbn of diff. words in star rating 4") 
+ws %>% filter(stars==5)  %>%  ggplot(aes(word, n)) + geom_col()+coord_flip()+ggtitle("Dstrbn of diff. words in star rating 5") 
+
+
+#Getting a sense of the words that are related to higher/lower star ratings in general 
+#One approach is to calculate the average star rating associated with each word - can sum the star ratings associated with reviews where each word occurs in.  Can consider the proportion of each word among reviews with a star rating.
+xx<- ws %>% group_by(word) %>% summarise(totWS=sum(stars*prop)) %>% view()
+xx1<- xx %>% group_by(word) %>% arrange(desc(totWS)) %>% view()
+xx1<- ungroup(xx1)
+#What are the 20 words associated with highest and lowest star rating
+xx1 %>% top_n(20)
+xx1 %>% top_n(-20)
+summary(xx1$totWS)
+#the words that have totWS less than the mean 0.0016794 should be considered as negative and above this should be considered all positive.
+#Using the totWS less than the mean 0.0016794 to obtain a label indicating ‘positive’ or ‘negative’
+words_new_av <- xx1 %>% select(word, totWS)%>% mutate(Sentiment=ifelse(totWS<=0.0016794, "Negative", "Positive"))
+```
+
+# Stemming and Lemmatization
+```{r , cache=TRUE}
+#rrTokens_stem<-rrTokens %>%  mutate(word_stem = SnowballC::wordStem(word))
+rrTokens_lemm<-rrTokens %>%  mutate(word_lemma = textstem::lemmatize_words(word))
+#Check the original words, and their stemmed-words and word-lemmas
+```
+
+# Term-frequency, tf-idf
+```{r  message=FALSE , cache=TRUE}
+
+#tokenize, remove stopwords, and lemmatize (or you can use stemmed words instead of lemmatization)
+rrTokens<-rrTokens %>%  mutate(word = textstem::lemmatize_words(word))
+
+#Or, to you can tokenize, remove stopwords, lemmatize  as
+#rrTokens <- resReviewsData %>% select(review_id, stars, text, ) %>% unnest_tokens(word, text) %>%  anti_join(stop_words) %>% mutate(word = textstem::lemmatize_words(word))
+ 
+#We may want to filter out words with less than 2 characters and those with more than 15 characters
+rrTokens<-rrTokens %>% filter(str_length(word)>=3 & str_length(word)<=15)
+rrTokens<- rrTokens %>% group_by(review_id, stars) %>% count(word)
+
+#count total number of words by review, and add this in a column
+totWords<-rrTokens  %>% group_by(review_id) %>%  count(word, sort=TRUE) %>% summarise(total=sum(n))
+rrtokens1<-left_join(rrTokens, totWords)
+# now n/total gives the tf values
+rrtokens1<-rrtokens1 %>% mutate(tf=n/total)
+head(rrtokens1)
+
+#We can use the bind_tfidf function to calculate the tf, idf and tfidf values
+# (https://www.rdocumentation.org/packages/tidytext/versions/0.2.2/topics/bind_tf_idf)
+rrTokens<-rrTokens %>% bind_tf_idf(word, review_id, n)
+head(rrTokens)
+summary(rrTokens$tf_idf)
+```
+
+
+#Sentiment analysis using the 3 sentiment dictionaries available with tidytext (use library(textdata))
+#AFINN http://www2.imm.dtu.dk/pubdb/views/publication_details.php?id=6010
+#bing  https://www.cs.uic.edu/~liub/FBS/sentiment-analysis.html 
+#nrc http://saifmohammad.com/WebPages/NRC-Emotion-Lexicon.htm
+
+```{r message=FALSE , cache=TRUE}
+library(textdata)
+#take a look at the wordsin the sentiment dictionaries
+get_sentiments("bing") %>% view()
+get_sentiments("nrc") %>% view()
+get_sentiments("afinn") %>% view()
+```
+
+# with bing dictionary
+```{r}
+#dictionary bing, sentiment of words in rrTokens
+rrSenti_bing<- rrTokens %>% left_join(get_sentiments("bing"), by="word")
+
+#if we want to retain only the words which match the sentiment dictionary, do an inner-join
+rrSenti_bing<- rrTokens %>% inner_join(get_sentiments("bing"), by="word")
+rrSenti_bing %>% group_by(word, sentiment)%>% view()
+
+#Analyze Which words contribute to positive/negative sentiment - we can count the ocurrences of positive/negative sentiment words in the reviews
+rr_bing<-rrSenti_bing %>% group_by(word, sentiment) %>% summarise(totOcc=sum(n)) %>% arrange(sentiment, desc(totOcc))
+ #negate the counts for the negative sentiment words
+rr_bing<- rr_bing %>% mutate (totOcc=ifelse(sentiment=="positive", totOcc, -totOcc))
+
+#the most positive and most negative words
+rr_bing<-ungroup(rr_bing)
+rr_bing %>% top_n(25)
+rr_bing %>% top_n(-25)
+
+#You can plot these
+rbind(top_n(rr_bing, 25), top_n(rr_bing, -25)) %>% ggplot(aes(word, totOcc, fill=sentiment)) +geom_col()+coord_flip()
+
+#or, with a better reordering of words
+rbind(top_n(rr_bing, 25), top_n(rr_bing, -25)) %>% mutate(word=reorder(word,totOcc)) %>% ggplot(aes(word, totOcc, fill=sentiment)) +geom_col()+coord_flip()
+```
+
+# with nrc dictionary
+```{r}
+rrSenti_nrc<-rrTokens %>% left_join(get_sentiments("nrc"), by="word") 
+rrSenti_nrc<-rrTokens %>% inner_join(get_sentiments("nrc"), by="word") 
+#to remove duplicated rows
+rrSenti_nrc1 <- rrSenti_nrc[,-8]
+rrSenti_nrc1<-rrSenti_nrc1[!duplicated(rrSenti_nrc1), ]
+rrSenti_nrc%>% group_by(word, sentiment)
+
+#%>% group_by (word, sentiment) 
+rr_nrc<-rrSenti_nrc %>% group_by(word, sentiment) %>% summarise(totOcc=sum(n)) %>% arrange(sentiment, desc(totOcc))
+
+#%>% summarise(totOcc=sum(n)) %>% arrange(sentiment, desc(totOcc))
+
+#How many words for the different sentiment categories
+rr_nrc %>% group_by(sentiment) %>% summarise(count=n(), sumn=sum(totOcc)) %>% view()
+
+#In 'nrc', the dictionary contains words defining different sentiments, like anger, disgust, positive, negative, joy, trust,.....   you should check the words deonting these different sentiments
+rrSenti_nrc %>% filter(sentiment=='anticipation') %>% view()
+rrSenti_nrc %>% filter(sentiment=='fear') %>% view()
+rrSenti_nrc %>% filter(sentiment=='anger') %>% view()
+rrSenti_nrc %>% filter(sentiment=='disgust') %>% view()
+rrSenti_nrc %>% filter(sentiment=='joy') %>% view()
+rrSenti_nrc %>% filter(sentiment=='negative') %>% view()
+rrSenti_nrc %>% filter(sentiment=='positive') %>% view()
+rrSenti_nrc %>% filter(sentiment=='surprise') %>% view()
+rrSenti_nrc %>% filter(sentiment=='trust') %>% view()
+
+#considering  {anger, disgust, fear sadness, negative} to denote 'bad' reviews, and {positive, joy, anticipation, trust} to denote 'good' reviews
+rr_nrc1<-rr_nrc %>% mutate(goodBad=ifelse(sentiment %in% c('anger', 'disgust', 'fear', 'sadness', 'negative'), -totOcc, ifelse(sentiment %in% c('positive', 'joy', 'anticipation', 'trust'), totOcc, 0)))
+rr_nrc1<-ungroup(rr_nrc1)
+top_n(rr_nrc1, 10)
+top_n(rr_nrc1, -10)
+
+rbind(top_n(rr_nrc1, 25), top_n(rr_nrc1, -25)) %>% mutate(word=reorder(word,goodBad)) %>% ggplot(aes(word, goodBad, fill=goodBad)) +geom_col()+coord_flip()
+```
+
+# with AFINN dictionary
+```{r}
+rrSenti_afinn<- rrTokens %>% inner_join(get_sentiments("afinn"), by="word")
+#revSenti_afinn1<-rrSenti_afinn %>% group_by(word, value) %>% summarise(totOcc=sum(n)) %>% arrange(value, desc(totOcc))
+rr_afinn <- rrSenti_afinn %>% group_by(word, value) %>% summarise(nwords=n(), sentiSum =sum(value))
+
+rr_afinn<-ungroup(rr_afinn)
+top_n(rr_afinn, 10)
+top_n(rr_afinn, -10)
+
+rbind(top_n(rr_afinn, 20), top_n(rr_afinn, -20)) %>% mutate(word=reorder(word,sentiSum)) %>% ggplot(aes(word, sentiSum, fill=sentiSum)) +geom_col()+coord_flip()
+```
+
+# Analysis by review sentiment - So far, we have analyzed overall sentiment across reviews, now let's look into sentiment by review and see how that relates to review's star ratings
+```{r message=FALSE , cache=TRUE}
+#summarise positive/negative sentiment words per review
+revSenti_bing <- rrSenti_bing %>% group_by(review_id, stars) %>% summarise(nwords=n(),posSum=sum(sentiment=='positive'), negSum=sum(sentiment=='negative'))
+
+revSenti_bing<- revSenti_bing %>% mutate(posProp=posSum/nwords, negProp=negSum/nwords)
+revSenti_bing<- revSenti_bing %>% mutate(sentiScore=posProp-negProp)
+
+#Do review start ratings correspond to the the positive/negative sentiment words
+revSenti_bing %>% group_by(stars) %>% summarise(avgPos=mean(posProp), avgNeg=mean(negProp), avgSentiSc=mean(sentiScore))
+#The star ratings of the words which are less than 3 are showing to have negative sentiscore values, therefore less star rating are corresponding to negative sentiments and vice-versa
+summary(revSenti_bing$sentiScore)
+```
+
+```{r}
+#With NRC
+revSenti_nrc <- rrSenti_nrc %>% mutate(sentiment=recode(sentiment, `joy`="positive", `anticipation`="positive",`trust`="positive", `anger`="negative",`disgust`="negative", `fear`="negative",`sadness`="negative",`surprise`="positive" ))
+revSenti_nrc  %>% group_by(sentiment) %>% count()
+revSenti_nrc1 <- revSenti_nrc %>% group_by(review_id, stars) %>% summarise(nwords=n(),posSum=sum(sentiment=='positive') , negSum=sum(sentiment=='negative'))
+
+revSenti_nrc1<- revSenti_nrc1 %>% mutate(posProp=posSum/nwords, negProp=negSum/nwords)
+revSenti_nrc1<- revSenti_nrc1 %>% mutate(sentiScore=posProp-negProp)
+
+#Do review start ratings correspond to the the positive/negative sentiment words
+revSenti_nrc1 %>% group_by(stars) %>% summarise(avgPos=mean(posProp), avgNeg=mean(negProp), avgSentiSc=mean(sentiScore))
+#as the star rating increases the Average senti score for the words also increases
+summary(revSenti_nrc1$sentiScore)
+```
+
+```{r}
+#with AFINN dictionary words....following similar steps as above, but noting that AFINN assigns negative to positive sentiment value for words matching the dictionary
+rrSenti_affin<- rrTokens %>% inner_join(get_sentiments("afinn"), by="word")
+
+revSenti_afinn <- rrSenti_afinn %>% group_by(review_id, stars) %>% summarise(nwords=n(), sentiSum =sum(value))
+
+revSenti_afinn %>% group_by(stars) %>% summarise(avgLen=mean(nwords), avgSenti=mean(sentiSum))
+summary(revSenti_afinn$avgSenti)
+#as the star rating increases the Average senti score for the corresponding word also increases
+```
+
+#Can we classify reviews on high/low starts based on aggregated sentiment of words in the reviews
+```{r message=FALSE , cache=TRUE}
+#we can consider reviews with 1 to 2 stars as negative, and this with 4 to 5 stars as positive
+revSenti_afinn <- revSenti_afinn %>% mutate(hiLo=ifelse(stars<=2,-1, ifelse(stars>=4, 1, 0 )))
+revSenti_afinn <- revSenti_afinn %>% mutate(pred_hiLo=ifelse(sentiSum >0, 1, -1)) 
+#filter out the reviews with 3 stars, and get the confusion matrix for hiLo vs pred_hiLo
+xx<-revSenti_afinn %>% filter(hiLo!=0)
+table(actual=xx$hiLo, predicted=xx$pred_hiLo )
+#18831 correctly classified as positive 
+```
+
+```{r}
+#Classifying based on words in nrc
+revSenti_nrc1 <- revSenti_nrc1 %>% mutate(hiLo=ifelse(stars<=2,-1, ifelse(stars>=4, 1, 0 )))
+revSenti_nrc1 <- revSenti_nrc1 %>% mutate(pred_hiLo=ifelse(sentiScore >0, 1, -1)) 
+#filter out the reviews with 3 stars, and get the confusion matrix for hiLo vs pred_hiLo
+xx1<-revSenti_nrc1 %>% filter(hiLo!=0)
+table(actual=xx1$hiLo, predicted=xx1$pred_hiLo )
+#20388 correctly predicted as positive
+```
+
+```{r}
+#Classifying based on words in bing
+revSenti_bing <- revSenti_bing %>% mutate(hiLo=ifelse(stars<=2,-1, ifelse(stars>=4, 1, 0 )))
+revSenti_bing <- revSenti_bing %>% mutate(pred_hiLo=ifelse(sentiScore >0, 1, -1)) 
+#filter out the reviews with 3 stars, and get the confusion matrix for hiLo vs pred_hiLo
+xx2<-revSenti_bing %>% filter(hiLo!=0)
+table(actual=xx2$hiLo, predicted=xx2$pred_hiLo )
+#18211 correctly predicted as positive
+```
+
+# Can we learn a model to predict hiLo ratings, from words in reviews
+```{r message =FALSE, cache=TRUE}
+
+#considering only those words which match a sentiment dictionary (for eg.  bing)
+
+#use pivot_wider to convert to a dtm form where each row is for a review and columns correspond to words   (https://tidyr.tidyverse.org/reference/pivot_wider.html)
+#revDTM_sentiBing <- rrSenti_bing %>%  pivot_wider(id_cols = review_id, names_from = word, values_from = tf_idf)
+
+#Or, since we want to keep the stars column
+revDTM_sentiBing <- rrSenti_bing %>%  pivot_wider(id_cols = c(review_id,stars), names_from = word, values_from = tf_idf)  %>% ungroup()
+#Note the ungroup() at the end -- this is IMPORTANT;  we have grouped based on (review_id, stars), and this grouping is retain by default, and can cause problems in the later steps
+
+#filter out the reviews with stars=3, and calculate hiLo sentiment 'class'
+revDTM_sentiBing <- revDTM_sentiBing %>% filter(stars!=3) %>% mutate(hiLo=ifelse(stars<=2, -1, 1)) %>% select(-stars)
+
+#how many review with 1, -1  'class'
+revDTM_sentiBing %>% group_by(hiLo) %>% tally()
+
+#develop a random forest model to predict hiLo from the words in the reviews
+library(ranger)
+
+#replace all the NAs with 0
+revDTM_sentiBing<-revDTM_sentiBing %>% replace(., is.na(.), 0)
+
+library(rsample)
+revDTM_sentiBing_split<- initial_split(revDTM_sentiBing, 0.5)
+revDTM_sentiBing_trn<- training(revDTM_sentiBing_split)
+revDTM_sentiBing_tst<- testing(revDTM_sentiBing_split)
+
+#Splitting train again to get a subset for model
+revDTM_sentiBing_trn1<-initial_split(revDTM_sentiBing_trn, 0.7)
+revDTM_sentiBing_trn2<- training(revDTM_sentiBing_trn1)
+#total observations 10,153
+revDTM_sentiBing_trn2<- revDTM_sentiBing_trn2[order(revDTM_sentiBing_trn2$hiLo),]
+
+rfModel1<-ranger(dependent.variable.name = "hiLo", data=revDTM_sentiBing_trn2 %>% select(-review_id), num.trees = 500, importance='permutation', probability = TRUE)
+
+#which variables are important
+importance(rfModel1) %>% view()
+
+#Obtain predictions, and calculate performance
+revSentiBing_predTrn<- predict(rfModel1, revDTM_sentiBing_trn2 %>% select(-review_id))$predictions
+revSentiBing_predTrn1<-revSentiBing_predTrn[,2]
+revSentiBing_predTrn2 <- ifelse(revSentiBing_predTrn1>0.3,1,-1)
+mean(revSentiBing_predTrn2 == revDTM_sentiBing_trn2$hiLo)
+#accuracy 0.91
+
+revSentiBing_predTst<- predict(rfModel1, revDTM_sentiBing_tst %>% select(-review_id))$predictions
+revSentiBing_predTst1<-revSentiBing_predTst[,2]
+revSentiBing_predTst2 <- ifelse(revSentiBing_predTst1>0.3,1,-1)
+mean(revSentiBing_predTst2 == revDTM_sentiBing_tst$hiLo)
+#accuracy 0.85
+
+library(pROC)
+#auc train
+auc(as.numeric(revDTM_sentiBing_trn2$hiLo), revSentiBing_predTrn[,2])
+#0.98
+#auc test
+auc(as.numeric(revDTM_sentiBing_tst$hiLo), revSentiBing_predTst[,2])
+#0.91
+table(actual=revDTM_sentiBing_trn2$hiLo, preds=revSentiBing_predTrn[,2]>0.3)
+#7716 correctly classified as true positives
+table(actual=revDTM_sentiBing_tst$hiLo, preds=revSentiBing_predTst[,2]>0.3)
+#10902 correctly classified as true positives
+library(ROCR)
+pred_rf_roc=prediction(as.numeric(revSentiBing_predTst[,2]),as.numeric(revDTM_sentiBing_tst$hiLo))
+aucPerf_rf1 <-performance(pred_rf_roc, "tpr", "fpr")
+plot(aucPerf_rf1) + abline(a=0, b= 1)
+
+#Splitting train again to get a subset for model
+revDTM_sentiBing_trn1a<-initial_split(revDTM_sentiBing_trn, 0.76)
+revDTM_sentiBing_trn2a<- training(revDTM_sentiBing_trn1a)
+#total observations 11024
+revDTM_sentiBing_trn2a<- revDTM_sentiBing_trn2a[order(revDTM_sentiBing_trn2a$hiLo),]
+
+#building random forest model on different subset of training data
+rfModel2<-ranger(dependent.variable.name = "hiLo", data=revDTM_sentiBing_trn2a %>% select(-review_id), num.trees = 500, importance='permutation', probability = TRUE)
+
+#which variables are important
+importance(rfModel2) %>% view()
+
+#Obtain predictions, and calculate performance
+revSentiBing_predTrn2a<- predict(rfModel2, revDTM_sentiBing_trn2a %>% select(-review_id))$predictions
+revSentiBing_predTrn1a<-revSentiBing_predTrn2a[,2]
+revSentiBing_predTrn2a1 <- ifelse(revSentiBing_predTrn1a>0.3,1,-1)
+mean(revSentiBing_predTrn2a1 == revDTM_sentiBing_trn2a$hiLo)
+#accuracy 0.91
+
+revSentiBing_predTst2a<- predict(rfModel2, revDTM_sentiBing_tst %>% select(-review_id))$predictions
+revSentiBing_predTst1a<-revSentiBing_predTst2a[,2]
+revSentiBing_predTst2a1 <- ifelse(revSentiBing_predTst1a>0.3,1,-1)
+mean(revSentiBing_predTst2a1 == revDTM_sentiBing_tst$hiLo)
+#accuracy 0.85
+
+library(pROC)
+#auc train
+auc(as.numeric(revDTM_sentiBing_trn2a$hiLo), revSentiBing_predTrn2a[,2])
+#0.99
+#auc test
+auc(as.numeric(revDTM_sentiBing_tst$hiLo), revSentiBing_predTst2a[,2])
+#0.92
+table(actual=revDTM_sentiBing_trn2a$hiLo, preds=revSentiBing_predTrn2a[,2]>0.3)
+#8310 correctly classified as true positives
+table(actual=revDTM_sentiBing_tst$hiLo, preds=revSentiBing_predTst2a[,2]>0.3)
+#10899 correctly classified as true positives
+library(ROCR)
+pred_rf_roc2=prediction(as.numeric(revSentiBing_predTst2a[,2]),as.numeric(revDTM_sentiBing_tst$hiLo))
+aucPerf_rf2 <-performance(pred_rf_roc2, "tpr", "fpr")
+plot(aucPerf_rf2) + abline(a=0, b= 1)
+```
+
+
+# Developing a naive-Bayes model on bing dictionary
+```{r message=FALSE, cache=TRUE}
+library(e1071)
+nbModel1<-naiveBayes(hiLo ~ ., data=revDTM_sentiBing_trn2 %>% select(-review_id))
+
+#prediction on train
+revSentiBing_NBpredTrn<-predict(nbModel1, revDTM_sentiBing_trn2, type = "raw")
+revSentiBing_NBpredTrn1<-revSentiBing_NBpredTrn[,2]
+revSentiBing_NBpredTrn2 <- ifelse(revSentiBing_NBpredTrn1>0.3,1,-1)
+mean(revSentiBing_NBpredTrn2 == revDTM_sentiBing_trn2$hiLo)
+#accuracy 0.46
+
+#predict on test
+revSentiBing_NBpredTst<-predict(nbModel1, revDTM_sentiBing_tst, type = "raw")
+revSentiBing_NBpredTst1<-revSentiBing_NBpredTst[,2]
+revSentiBing_NBpredTst2 <- ifelse(revSentiBing_NBpredTst1>0.3,1,-1)
+mean(revSentiBing_NBpredTst2 == revDTM_sentiBing_tst$hiLo)
+#accuracy 0.47
+#auc train
+auc(as.numeric(revDTM_sentiBing_trn2$hiLo), revSentiBing_NBpredTrn[,2])
+#0.69
+
+#auc test
+auc(as.numeric(revDTM_sentiBing_tst$hiLo), revSentiBing_NBpredTst[,2])
+#0.72
+
+table(actual=revDTM_sentiBing_trn2$hiLo, preds=revSentiBing_NBpredTrn[,2]>0.3)
+table(actual=revDTM_sentiBing_tst$hiLo, preds=revSentiBing_NBpredTst[,2]>0.3)
+
+library(ROCR)
+pred_rf_nb=prediction(as.numeric(revSentiBing_NBpredTst[,2]),as.numeric(revDTM_sentiBing_tst$hiLo))
+aucPerf_nb <-performance(pred_rf_nb, "tpr", "fpr")
+plot(aucPerf_nb) + abline(a=0, b= 1)
+
+#with different subset of training data
+nbModel2<-naiveBayes(hiLo ~ ., data=revDTM_sentiBing_trn2a %>% select(-review_id))
+
+#predict on train
+revSentiBing_NBpredTrn2a<-predict(nbModel2, revDTM_sentiBing_trn2a, type = "raw")
+revSentiBing_NBpredTrn2a1<-revSentiBing_NBpredTrn2a[,2]
+revSentiBing_NBpredTrn2a2 <- ifelse(revSentiBing_NBpredTrn2a1>0.3,1,-1)
+mean(revSentiBing_NBpredTrn2a2== revDTM_sentiBing_trn2a$hiLo)
+#0.48
+#predict on test
+revSentiBing_NBpredTst2a<-predict(nbModel2, revDTM_sentiBing_tst, type = "raw")
+revSentiBing_NBpredTst2a1<-revSentiBing_NBpredTst2a[,2]
+revSentiBing_NBpredTst2a2 <- ifelse(revSentiBing_NBpredTst2a1>0.3,1,-1)
+mean(revSentiBing_NBpredTst2a== revDTM_sentiBing_tst$hiLo)
+#0.33
+#auc train
+auc(as.numeric(revDTM_sentiBing_trn2a$hiLo), revSentiBing_NBpredTrn2a[,2])
+#0.70
+#auc test
+auc(as.numeric(revDTM_sentiBing_tst$hiLo), revSentiBing_NBpredTst2a[,2])
+#0.72
+
+table(actual=revDTM_sentiBing_trn2a$hiLo, preds=revSentiBing_NBpredTrn2a[,2]>0.3)
+table(actual=revDTM_sentiBing_tst$hiLo, preds=revSentiBing_NBpredTst2a[,2]>0.3)
+
+library(ROCR)
+pred_rf_nb2=prediction(as.numeric(revSentiBing_NBpredTst2a[,2]),as.numeric(revDTM_sentiBing_tst$hiLo))
+aucPerf_nb2 <-performance(pred_rf_nb2, "tpr", "fpr")
+plot(aucPerf_nb2) + abline(a=0, b= 1)
+```
+
+# Developing SVM model on bing dictionary
+```{r}
+library(e1071)
+
+svmM1 <- svm(as.factor(hiLo) ~., data = revDTM_sentiBing_trn2 %>%select(-review_id),
+kernel="radial", cost=10,gamma=0.5, scale=FALSE)
+
+revDTM_predTrn_svm1<-predict(svmM1, revDTM_sentiBing_trn2)
+mean(revDTM_predTrn_svm1 == revDTM_sentiBing_trn2$hiLo)
+#accuracy train 0.92
+table(actual= revDTM_sentiBing_trn2$hiLo, predicted= revDTM_predTrn_svm1)
+revDTM_predTst_svm1<-predict(svmM1, revDTM_sentiBing_tst)
+mean(revDTM_predTst_svm1 == revDTM_sentiBing_tst$hiLo)
+#accuracy test 0.89
+table(actual= revDTM_sentiBing_tst$hiLo, predicted= revDTM_predTst_svm1)
+#auc train
+auc(as.numeric(revDTM_sentiBing_trn2$hiLo), as.numeric(revDTM_predTrn_svm1))
+#0.85
+#auc test
+auc(as.numeric(revDTM_sentiBing_tst$hiLo), as.numeric(revDTM_predTst_svm1))
+#0.81
+#building ROC curve
+pred_rf_svm=prediction(as.numeric(revDTM_predTst_svm1),as.numeric(revDTM_sentiBing_tst$hiLo))
+aucPerf_svm <-performance(pred_rf_svm, "tpr", "fpr")
+plot(aucPerf_svm) + abline(a=0, b= 1)
+
+#Building SVM with different subset of training data
+svmM2 <- svm(as.factor(hiLo) ~., data = revDTM_sentiBing_trn2a %>%select(-review_id),
+kernel="radial", cost=10,gamma=0.5, scale=FALSE)
+#predict train
+revDTM_predTrn_svm2<-predict(svmM2, revDTM_sentiBing_trn2a)
+mean(revDTM_predTrn_svm2 == revDTM_sentiBing_trn2a$hiLo)
+#accuracy train 0.92
+table(actual= revDTM_sentiBing_trn2a$hiLo, predicted= revDTM_predTrn_svm2)
+#predict test
+revDTM_predTst_svm2<-predict(svmM2, revDTM_sentiBing_tst)
+mean(revDTM_predTst_svm2 == revDTM_sentiBing_tst$hiLo)
+#accuracy test 0.89
+table(actual= revDTM_sentiBing_tst$hiLo, predicted= revDTM_predTst_svm2)
+
+auc(as.numeric(revDTM_sentiBing_trn2a$hiLo), as.numeric(revDTM_predTrn_svm2))
+#0.86
+auc(as.numeric(revDTM_sentiBing_tst$hiLo), as.numeric(revDTM_predTst_svm2))
+#0.81
+
+#building ROC curve
+pred_rf_svm2=prediction(as.numeric(revDTM_predTst_svm2),as.numeric(revDTM_sentiBing_tst$hiLo))
+aucPerf_svm2 <-performance(pred_rf_svm2, "tpr", "fpr")
+plot(aucPerf_svm2) + abline(a=0, b= 1)
+```
+
+# Building models on NRC dictionary
+```{r}
+revDTM_senti_nrc <- rrSenti_nrc1 %>%  pivot_wider(id_cols = c(review_id,stars), names_from = word, values_from = tf_idf)  %>% ungroup()
+
+#filter out the reviews with stars=3, and calculate hiLo sentiment 'class'
+revDTM_senti_nrc<- revDTM_senti_nrc %>% filter(stars!=3) %>% mutate(hiLo=ifelse(stars<=2, -1, 1)) %>% select(-stars)
+
+#how many review with 1, -1  'class'
+revDTM_senti_nrc %>% group_by(hiLo) %>% tally()
+```
+
+# Develop a random forest model to predict hiLo from the words in the reviews
+```{r}
+#replace all the NAs with 0
+revDTM_senti_nrc<-revDTM_senti_nrc %>% replace(., is.na(.), 0)
+
+library(rsample)
+revDTM_senti_nrc_split<- initial_split(revDTM_senti_nrc, 0.5)
+revDTM_senti_nrc_trn<- training(revDTM_senti_nrc_split)
+revDTM_senti_nrc_tst<- testing(revDTM_senti_nrc_split)
+
+#Splitting train again to get a subset for model
+revDTM_senti_nrc_trn1<-initial_split(revDTM_senti_nrc_trn, 0.70)
+revDTM_senti_nrc_trn2<- training(revDTM_senti_nrc_trn1)
+#total observations 10,460
+revDTM_senti_nrc_trn2<- revDTM_senti_nrc_trn2[order(revDTM_senti_nrc_trn2$hiLo),]
+
+rfModel_nrc<-ranger(dependent.variable.name = "hiLo", data=revDTM_senti_nrc_trn2 %>% select(-review_id), num.trees = 500, importance='permutation', probability = TRUE)
+
+#which variables are important
+importance(rfModel_nrc) %>% view()
+
+#prediction on train
+revSentiNrc_predTrn<- predict(rfModel_nrc, revDTM_senti_nrc_trn2 %>% select(-review_id))$predictions
+revSentiNrc_predTrn1<-revSentiNrc_predTrn[,2]
+revSentiNrc_predTrn2 <- ifelse(revSentiNrc_predTrn1>0.3,1,-1)
+mean(revSentiNrc_predTrn2 == revDTM_senti_nrc_trn2$hiLo)
+#accuracy train 0.90
+
+#prediction on test
+revSentiNrc_predTst<- predict(rfModel_nrc, revDTM_senti_nrc_tst %>% select(-review_id))$predictions
+revSentiNrc_predTst1<-revSentiNrc_predTst[,2]
+revSentiNrc_predTst2 <- ifelse(revSentiNrc_predTst1>0.3,1,-1)
+mean(revSentiNrc_predTst2 == revDTM_senti_nrc_tst$hiLo)
+# accuracy test 0.83
+
+#auc train
+auc(as.numeric(revDTM_senti_nrc_trn2$hiLo), revSentiNrc_predTrn[,2])
+#0.99
+#auc test
+auc(as.numeric(revDTM_senti_nrc_tst$hiLo), revSentiNrc_predTst[,2])
+#0.90
+
+table(actual=revDTM_senti_nrc_trn2$hiLo, preds=revSentiNrc_predTrn[,2]>0.3)
+#7838 correctly classified as true positives
+table(actual=revDTM_senti_nrc_tst$hiLo, preds=revSentiNrc_predTst[,2]>0.3)
+#11233 correctly classified as true positives
+
+library(ROCR)
+pred_rf_roc_nrc=prediction(as.numeric(revSentiNrc_predTst[,2]),as.numeric(revDTM_senti_nrc_tst$hiLo))
+aucPerf_rf1_nrc <-performance(pred_rf_roc_nrc, "tpr", "fpr")
+plot(aucPerf_rf1_nrc) + abline(a=0, b= 1)
+
+#Splitting train again to get a subset for model
+revDTM_senti_nrc_trn1a<-initial_split(revDTM_senti_nrc_trn, 0.75)
+revDTM_senti_nrc_trn2a<- training(revDTM_senti_nrc_trn1a)
+#11207 observations
+revDTM_senti_nrc_trn2a<- revDTM_senti_nrc_trn2a[order(revDTM_senti_nrc_trn2a$hiLo),]
+
+#building random forest model on different subset of training data
+rfModel_nrc2<-ranger(dependent.variable.name = "hiLo", data=revDTM_senti_nrc_trn2a %>% select(-review_id), num.trees = 500, importance='permutation', probability = TRUE)
+
+#which variables are important
+importance(rfModel_nrc2) %>% view()
+
+#Obtain predictions, and calculate performance
+revSentiNrc_predTrn2a<- predict(rfModel_nrc2, revDTM_senti_nrc_trn2a %>% select(-review_id))$predictions
+revSentiNrc_predTrn2a1<-revSentiNrc_predTrn2a[,2]
+revSentiNrc_predTrn2a2 <- ifelse(revSentiNrc_predTrn2a1>0.3,1,-1)
+mean(revSentiNrc_predTrn2a2 == revDTM_senti_nrc_trn2a$hiLo)
+#accuracy train 0.90
+
+revSentiNrc_predTst2a<- predict(rfModel_nrc2, revDTM_senti_nrc_tst %>% select(-review_id))$predictions
+revSentiNrc_predTst2a1<-revSentiNrc_predTst2a[,2]
+revSentiNrc_predTst2a2 <- ifelse(revSentiNrc_predTst2a1>0.3,1,-1)
+mean(revSentiNrc_predTst2a2 == revDTM_senti_nrc_tst$hiLo)
+#accuracy test 0.86
+
+#auc train
+auc(as.numeric(revDTM_senti_nrc_trn2a$hiLo), revSentiNrc_predTrn2a[,2])
+#0.99
+#auc test
+auc(as.numeric(revDTM_senti_nrc_tst$hiLo), revSentiNrc_predTst2a[,2])
+#0.94
+
+table(actual=revDTM_senti_nrc_trn2a$hiLo, preds=revSentiNrc_predTrn2a[,2]>0.3)
+#8403 correctly classified as true positives
+table(actual=revDTM_senti_nrc_tst$hiLo, preds=revSentiNrc_predTst2a[,2]>0.3)
+#11239 correctlt classified as true positives
+#roc
+pred_rf_roc_nrc2=prediction(as.numeric(revSentiNrc_predTst2a[,2]),as.numeric(revDTM_senti_nrc_tst$hiLo))
+aucPerf_rf2_nrc<-performance(pred_rf_roc_nrc2, "tpr", "fpr")
+plot(aucPerf_rf2_nrc) + abline(a=0, b= 1)
+```
+
+# Building naive bayes on NRC dictionary
+```{r}
+library(e1071)
+nbModel1_nrc<-naiveBayes(hiLo ~ ., data=revDTM_senti_nrc_trn2 %>% select(-review_id))
+
+#prediction on train
+revSentiNrc_NBpredTrn<-predict(nbModel1_nrc, revDTM_senti_nrc_trn2, type = "raw")
+revSentiNrc_NBpredTrn1<-revSentiNrc_NBpredTrn[,2]
+revSentiNrc_NBpredTrn2 <- ifelse(revSentiNrc_NBpredTrn1>0.3,1,-1)
+mean(revSentiNrc_NBpredTrn2 == revDTM_senti_nrc_trn2$hiLo)
+#accuracy train 0.42
+
+revSentiNrc_NBpredTst<-predict(nbModel1_nrc, revDTM_senti_nrc_tst, type = "raw")
+revSentiNrc_NBpredTst1<-revSentiNrc_NBpredTst[,2]
+revSentiNrc_NBpredTst2 <- ifelse(revSentiNrc_NBpredTst1>0.3,1,-1)
+mean(revSentiNrc_NBpredTst2 == revDTM_senti_nrc_tst$hiLo)
+#accuracy test 0.43
+
+#auc train
+auc(as.numeric(revDTM_senti_nrc_trn2$hiLo), revSentiNrc_NBpredTrn[,2])
+#0.66
+
+#auc test
+auc(as.numeric(revDTM_senti_nrc_tst$hiLo), revSentiNrc_NBpredTst[,2])
+#0.68
+
+table(actual=revDTM_senti_nrc_trn2$hiLo, preds=revSentiNrc_NBpredTrn[,2]>0.3)
+#2383 correctly classified as true positive
+table(actual=revDTM_senti_nrc_tst$hiLo, preds=revSentiNrc_NBpredTst[,2]>0.3)
+#3378 correctly classified as true postive
+
+#roc
+pred_nrc_nb1=prediction(as.numeric(revSentiNrc_NBpredTst[,2]),as.numeric(revDTM_senti_nrc_tst$hiLo))
+aucPerf_nb1_nrc <-performance(pred_nrc_nb1, "tpr", "fpr")
+plot(aucPerf_nb1_nrc) + abline(a=0, b= 1)
+
+#building naive bayes with different subset of training data
+nbModel2_nrc<-naiveBayes(hiLo ~ ., data=revDTM_senti_nrc_trn2a %>% select(-review_id))
+
+#prediction
+revSentiNrc_NBpredTrn2a<-predict(nbModel2_nrc, revDTM_senti_nrc_trn2a, type = "raw")
+revSentiNrc_NBpredTrn2a1<-revSentiNrc_NBpredTrn2a[,2]
+revSentiNrc_NBpredTrn2a2 <- ifelse(revSentiNrc_NBpredTrn2a1>0.3,1,-1)
+mean(revSentiNrc_NBpredTrn2a2 == revDTM_senti_nrc_trn2a$hiLo)
+#accuracy train 0.44
+
+revSentiNrc_NBpredTst2a<-predict(nbModel2_nrc, revDTM_senti_nrc_tst, type = "raw")
+revSentiNrc_NBpredTst2a1<-revSentiNrc_NBpredTst2a[,2]
+revSentiNrc_NBpredTst2a2 <- ifelse(revSentiNrc_NBpredTst2a1>0.3,1,-1)
+mean(revSentiNrc_NBpredTst2a2 == revDTM_senti_nrc_tst$hiLo)
+#accuracy test 0.45
+
+#auc train
+auc(as.numeric(revDTM_senti_nrc_trn2a$hiLo), revSentiNrc_NBpredTrn2a[,2])
+#0.67
+#auc test
+auc(as.numeric(revDTM_senti_nrc_tst$hiLo), revSentiNrc_NBpredTst2a[,2])
+#0.68
+table(actual=revDTM_senti_nrc_trn2a$hiLo, preds=revSentiNrc_NBpredTrn2a[,2]>0.3)
+#2774 correctly classified as true positives
+table(actual=revDTM_senti_nrc_tst$hiLo, preds=revSentiNrc_NBpredTst2a[,2]>0.3)
+#3670 correctly classified as true positives
+#roc
+pred_nrc_nb2=prediction(as.numeric(revSentiNrc_NBpredTst2a[,2]),as.numeric(revDTM_senti_nrc_tst$hiLo))
+aucPerf_nb2_nrc <-performance(pred_nrc_nb2, "tpr", "fpr")
+plot(aucPerf_nb2_nrc) + abline(a=0, b= 1)
+```
+
+# Buidling svm for nrc
+```{r}
+svmM1_nrc <- svm(as.factor(hiLo) ~., data = revDTM_senti_nrc_trn2 %>%select(-review_id),kernel="radial", cost=10,gamma=0.5, scale=FALSE)
+
+#prediction
+revDTM_predTrn_svm1_nrc<-predict(svmM1_nrc, revDTM_senti_nrc_trn2)
+mean(revDTM_predTrn_svm1_nrc == revDTM_senti_nrc_trn2$hiLo)
+#accuracy train 0.93
+table(actual= revDTM_senti_nrc_trn2$hiLo, predicted= revDTM_predTrn_svm1_nrc)
+#7772 correctly classified as true positives 
+revDTM_predTst_svm1_nrc<-predict(svmM1_nrc, revDTM_senti_nrc_tst)
+mean(revDTM_predTst_svm1_nrc == revDTM_senti_nrc_tst$hiLo)
+#accuracy test 0.87
+table(actual= revDTM_senti_nrc_tst$hiLo, predicted= revDTM_predTst_svm1_nrc)
+#10756 classified correctly as true positives
+#auc train
+auc(as.numeric(revDTM_senti_nrc_trn2$hiLo), as.numeric(revDTM_predTrn_svm1_nrc))
+#0.86
+#auc test
+auc(as.numeric(revDTM_senti_nrc_tst$hiLo), as.numeric(revDTM_predTst_svm1_nrc))
+#0.79
+
+#building ROC curve
+pred_nrc_svm1=prediction(as.numeric(revDTM_predTst_svm1_nrc),as.numeric(revDTM_senti_nrc_tst$hiLo))
+aucPerf_svm1_nrc <-performance(pred_nrc_svm1, "tpr", "fpr")
+plot(aucPerf_svm1_nrc) + abline(a=0, b= 1)
+
+#Building SVM with different subset of training data
+svmM2_nrc <- svm(as.factor(hiLo) ~., data = revDTM_senti_nrc_trn2a %>%select(-review_id),kernel="radial", cost=10,gamma=0.5, scale=FALSE)
+
+revDTM_predTrn_svm2_nrc<-predict(svmM2_nrc, revDTM_senti_nrc_trn2a)
+mean(revDTM_predTrn_svm2_nrc == revDTM_senti_nrc_trn2a$hiLo)
+#accuracy train 0.93
+table(actual= revDTM_senti_nrc_trn2a$hiLo, predicted= revDTM_predTrn_svm2_nrc)
+# 8290 correctly classified as true positives 
+
+revDTM_predTst_svm2_nrc<-predict(svmM2_nrc, revDTM_senti_nrc_tst)
+mean(revDTM_predTst_svm2_nrc == revDTM_senti_nrc_tst$hiLo)
+#accuravy test 0.87
+table(actual= revDTM_senti_nrc_tst$hiLo, predicted= revDTM_predTst_svm2_nrc)
+#10708 correctly classified as true positives
+#auc train
+auc(as.numeric(revDTM_senti_nrc_trn2a$hiLo), as.numeric(revDTM_predTrn_svm2_nrc))
+#0.87
+#auc test
+auc(as.numeric(revDTM_senti_nrc_tst$hiLo), as.numeric(revDTM_predTst_svm2_nrc))
+#0.79
+
+#building ROC curve
+pred_nrc_svm2=prediction(as.numeric(revDTM_predTst_svm2_nrc),as.numeric(revDTM_senti_nrc_tst$hiLo))
+aucPerf_svm2_nrc <-performance(pred_nrc_svm2, "tpr", "fpr")
+plot(aucPerf_svm2_nrc) + abline(a=0, b= 1)
+```
+
+# Building models on affin dictionary
+```{r}
+revDTM_senti_affin <- rrSenti_afinn %>%  pivot_wider(id_cols = c(review_id,stars), names_from = word, values_from = tf_idf)  %>% ungroup()
+
+#filter out the reviews with stars=3, and calculate hiLo sentiment 'class'
+revDTM_senti_affin<- revDTM_senti_affin %>% filter(stars!=3) %>% mutate(hiLo=ifelse(stars<=2, -1, 1)) %>% select(-stars)
+
+#how many review with 1, -1  'class'
+revDTM_senti_affin %>% group_by(hiLo) %>% tally()
+
+#develop a random forest model to predict hiLo from the words in the reviews
+#replace all the NAs with 0
+revDTM_senti_affin<-revDTM_senti_affin %>% replace(., is.na(.), 0)
+
+library(rsample)
+revDTM_sentiAffin_split<- initial_split(revDTM_senti_affin, 0.5)
+revDTM_sentiAffin_trn<- training(revDTM_sentiAffin_split)
+revDTM_sentiAffin_tst<- testing(revDTM_sentiAffin_split)
+
+#Splitting train again to get a subset for model
+revDTM_sentiAffin_trn1<-initial_split(revDTM_sentiAffin_trn, 0.75)
+revDTM_sentiAffin_trn2<- training(revDTM_sentiAffin_trn1)
+#10656 observations
+revDTM_sentiAffin_trn2<- revDTM_sentiAffin_trn2[order(revDTM_sentiAffin_trn2$hiLo),]
+
+rfModel1_affin<-ranger(dependent.variable.name = "hiLo", data=revDTM_sentiAffin_trn2 %>% select(-review_id), num.trees = 500, importance='permutation', probability = TRUE)
+
+#which variables are important
+importance(rfModel1_affin) %>% view()
+
+#Obtain predictions, and calculate performance
+revSentiAffin_predTrn<- predict(rfModel1_affin, revDTM_sentiAffin_trn2 %>% select(-review_id))$predictions
+revSentiAffin_predTrn1<-revSentiAffin_predTrn[,2]
+revSentiAffin_predTrn2 <- ifelse(revSentiAffin_predTrn1>0.3,1,-1)
+mean(revSentiAffin_predTrn2 == revDTM_sentiAffin_trn2$hiLo)
+#accuracy train 0.89
+revSentiAffin_predTst<- predict(rfModel1_affin, revDTM_sentiAffin_tst %>% select(-review_id))$predictions
+revSentiAffin_predTst1<-revSentiAffin_predTst[,2]
+revSentiAffin_predTst2 <- ifelse(revSentiAffin_predTst1>0.3,1,-1)
+mean(revSentiAffin_predTst2 == revDTM_sentiAffin_tst$hiLo)
+#accuracy test 0.84
+library(pROC)
+auc(as.numeric(revDTM_sentiAffin_trn2$hiLo), revSentiAffin_predTrn[,2])
+#auc train 0.98
+auc(as.numeric(revDTM_sentiAffin_tst$hiLo), revSentiAffin_predTst[,2])
+#auc test 0.89
+table(actual=revDTM_sentiAffin_trn2$hiLo, preds=revSentiAffin_predTrn[,2]>0.3)
+#8069 correctly classified as true positives
+table(actual=revDTM_sentiAffin_tst$hiLo, preds=revSentiAffin_predTst[,2]>0.3)
+#10539 correctly classified as true positives
+pred_rf_roc_affin1=prediction(as.numeric(revSentiAffin_predTst[,2]),as.numeric(revDTM_sentiAffin_tst$hiLo))
+aucPerf_rf1_affin <-performance(pred_rf_roc_affin1, "tpr", "fpr")
+plot(aucPerf_rf1_affin) + abline(a=0, b= 1)
+
+#Splitting train again to get a subset for model
+revDTM_sentiAffin_trn1a<-initial_split(revDTM_sentiAffin_trn, 0.80)
+revDTM_sentiAffin_trn2a<- training(revDTM_sentiAffin_trn1a)
+#11367 observations
+revDTM_sentiAffin_trn2a<- revDTM_sentiAffin_trn2a[order(revDTM_sentiAffin_trn2a$hiLo),]
+
+#building random forest model on different subset of training data
+rfModel_affin2<-ranger(dependent.variable.name = "hiLo", data=revDTM_sentiAffin_trn2a %>% select(-review_id), num.trees = 500, importance='permutation', probability = TRUE)
+
+#which variables are important
+importance(rfModel_affin2) %>% view()
+
+#Obtain predictions, and calculate performance
+revSentiAffin_predTrn2a<- predict(rfModel_affin2, revDTM_sentiAffin_trn2a %>% select(-review_id))$predictions
+revSentiAffin_predTrn2a1<-revSentiAffin_predTrn2a[,2]
+revSentiAffin_predTrn2a2 <- ifelse(revSentiAffin_predTrn2a1>0.3,1,-1)
+mean(revSentiAffin_predTrn2a2 == revDTM_sentiAffin_trn2a$hiLo)
+#accuracy train 0.89
+
+revSentiAffin_predTst2a<- predict(rfModel_affin2, revDTM_sentiAffin_tst %>% select(-review_id))$predictions
+revSentiAffin_predTst2a1<-revSentiAffin_predTst2a[,2]
+revSentiAffin_predTst2a2 <- ifelse(revSentiAffin_predTst2a1>0.3,1,-1)
+mean(revSentiAffin_predTst2a2 == revDTM_sentiAffin_tst$hiLo)
+#accuracy test 0.83
+auc(as.numeric(revDTM_sentiAffin_trn2a$hiLo), revSentiAffin_predTrn2a[,2])
+#auc train 0.98
+auc(as.numeric(revDTM_sentiAffin_tst$hiLo), revSentiAffin_predTst2a[,2])
+#0.89
+table(actual=revDTM_sentiAffin_trn2a$hiLo, preds=revSentiAffin_predTrn2a[,2]>0.3)
+#8592 correctly classified as true positive
+table(actual=revDTM_sentiAffin_tst$hiLo, preds=revSentiAffin_predTst2a[,2]>0.3)
+#10542 correctly classified as true positive
+pred_rf_roc_affin2=prediction(as.numeric(revSentiAffin_predTst2a[,2]),as.numeric(revDTM_sentiAffin_tst$hiLo))
+aucPerf_rf2_affin<-performance(pred_rf_roc_affin2, "tpr", "fpr")
+plot(aucPerf_rf2_affin) + abline(a=0, b= 1)
+```
+
+# Building naive bayes on affin dictionary
+```{r}
+nbModel1_affin<-naiveBayes(hiLo ~ ., data=revDTM_sentiAffin_trn2 %>% select(-review_id))
+
+#prediction on train
+revSentiAffin_NBpredTrn<-predict(nbModel1_affin, revDTM_sentiAffin_trn2, type = "raw")
+revSentiAffin_NBpredTrn1<-revSentiAffin_NBpredTrn[,2]
+revSentiAffin_NBpredTrn2 <- ifelse(revSentiAffin_NBpredTrn1>0.3,1,-1)
+mean(revSentiAffin_NBpredTrn2 == revDTM_sentiAffin_trn2$hiLo)
+#0.608
+revSentiAffin_NBpredTst<-predict(nbModel1_affin, revDTM_sentiAffin_tst, type = "raw")
+revSentiAffin_NBpredTst1<-revSentiAffin_NBpredTst[,2]
+revSentiAffin_NBpredTst2 <- ifelse(revSentiAffin_NBpredTst1>0.3,1,-1)
+mean(revSentiAffin_NBpredTst2 == revDTM_sentiAffin_tst$hiLo)
+#0.618
+#auc train
+auc(as.numeric(revDTM_sentiAffin_trn2$hiLo), revSentiAffin_NBpredTrn[,2])
+#0.724
+#auc test
+auc(as.numeric(revDTM_sentiAffin_tst$hiLo), revSentiAffin_NBpredTst[,2])
+#0.731
+table(actual=revDTM_sentiAffin_trn2$hiLo, preds=revSentiAffin_NBpredTrn[,2]>0.3)
+#4491 correctly classified as true positives
+table(actual=revDTM_sentiAffin_tst$hiLo, preds=revSentiAffin_NBpredTst[,2]>0.3)
+#6126 correctly classified as true positives
+
+pred_affin_nb1=prediction(as.numeric(revSentiAffin_NBpredTst[,2]),as.numeric(revDTM_sentiAffin_tst$hiLo))
+aucPerf_nb1_affin <-performance(pred_affin_nb1, "tpr", "fpr")
+plot(aucPerf_nb1_affin) + abline(a=0, b= 1)
+
+#with different subset of training data
+nbModel2_affin<-naiveBayes(hiLo ~ ., data=revDTM_sentiAffin_trn2a %>% select(-review_id))
+#prediction on train
+revSentiAffin_NBpredTrn2a<-predict(nbModel2_affin, revDTM_sentiAffin_trn2a, type = "raw")
+revSentiAffin_NBpredTrn2a1<-revSentiAffin_NBpredTrn2a[,2]
+revSentiAffin_NBpredTrn2a2 <- ifelse(revSentiAffin_NBpredTrn2a1>0.3,1,-1)
+mean(revSentiAffin_NBpredTrn2a2 ==  revDTM_sentiAffin_trn2a$hiLo)
+#accuracy train 0.58
+
+#prediction on test
+revSentiAffin_NBpredTst2a<-predict(nbModel2_affin, revDTM_sentiAffin_tst, type = "raw")
+revSentiAffin_NBpredTst2a1<-revSentiAffin_NBpredTst2a[,2]
+revSentiAffin_NBpredTst2a2 <- ifelse(revSentiAffin_NBpredTst2a1>0.3,1,-1)
+mean(revSentiAffin_NBpredTst2a2 ==  revDTM_sentiAffin_tst$hiLo)
+#accuracy test 0.58
+
+#auc train
+auc(as.numeric(revDTM_sentiAffin_trn2a$hiLo), revSentiAffin_NBpredTrn2a[,2])
+#auc train 0.73
+
+#auc test
+auc(as.numeric(revDTM_sentiAffin_tst$hiLo), revSentiAffin_NBpredTst2a[,2])
+#auc test 0.72
+
+table(actual=revDTM_sentiAffin_trn2a$hiLo, preds=revSentiAffin_NBpredTrn2a[,2]>0.3)
+#4438 correctly classified as  true positive
+
+table(actual=revDTM_sentiAffin_tst$hiLo, preds=revSentiAffin_NBpredTst2a[,2]>0.3)
+#5597 correctly classified as true positives 
+
+#ROC
+pred_affin_nb2=prediction(as.numeric(revSentiAffin_NBpredTst2a[,2]),as.numeric(revDTM_sentiAffin_tst$hiLo))
+aucPerf_nb2_affin <-performance(pred_affin_nb2, "tpr", "fpr")
+plot(aucPerf_nb2_affin) + abline(a=0, b= 1)
+```
+
+# Developing svm on affin dictionary
+```{r}
+svmM1_affin <- svm(as.factor(hiLo) ~., data = revDTM_sentiAffin_trn2 %>%select(-review_id),kernel="radial", cost=10,gamma=0.5, scale=FALSE)
+
+#prediction
+revDTM_predTrn_svm1_affin<-predict(svmM1_affin, revDTM_sentiAffin_trn2)
+mean(revDTM_predTrn_svm1_affin == revDTM_sentiAffin_trn2$hiLo)
+#accuracy train 0.88
+table(actual= revDTM_sentiAffin_trn2$hiLo, predicted= revDTM_predTrn_svm1_affin)
+#7772 correctly classified as true positives
+
+revDTM_predTst_svm1_affin<-predict(svmM1_affin, revDTM_sentiAffin_tst)
+mean(revDTM_predTst_svm1_affin == revDTM_sentiAffin_tst$hiLo)
+#accuracy test 0.87
+table(actual= revDTM_sentiAffin_tst$hiLo, predicted= revDTM_predTst_svm1_affin)
+#10359 correctly classified as true positives 
+auc(as.numeric(revDTM_sentiAffin_trn2$hiLo), as.numeric(revDTM_predTrn_svm1_affin))
+#0.80 train
+auc(as.numeric(revDTM_sentiAffin_tst$hiLo), as.numeric(revDTM_predTst_svm1_affin))
+#0.78 test
+#building ROC curve
+pred_affin_svm1=prediction(as.numeric(revDTM_predTst_svm1_affin),as.numeric(revDTM_sentiAffin_tst$hiLo))
+aucPerf_svm1_affin <-performance(pred_affin_svm1, "tpr", "fpr")
+plot(aucPerf_svm1_affin) + abline(a=0, b= 1)
+
+#Building SVM with different subset of training data
+svmM2_affin <- svm(as.factor(hiLo) ~., data = revDTM_sentiAffin_trn2a %>%select(-review_id),kernel="radial", cost=10,gamma=0.5, scale=FALSE)
+
+revDTM_predTrn_svm2_affin<-predict(svmM2_affin, revDTM_sentiAffin_trn2a)
+mean(revDTM_predTrn_svm2_affin == revDTM_sentiAffin_trn2a$hiLo)
+#accuracy train 0.88
+table(actual= revDTM_sentiAffin_trn2a$hiLo, predicted= revDTM_predTrn_svm2_affin)
+#8286 correctly classified as true positives
+revDTM_predTst_svm2_affin<-predict(svmM2_affin, revDTM_sentiAffin_tst)
+mean(revDTM_predTst_svm2_affin == revDTM_sentiAffin_tst$hiLo)
+#accuracy test 0.87
+table(actual= revDTM_sentiAffin_tst$hiLo, predicted= revDTM_predTst_svm2_affin)
+#10352 correctly classified as true positives
+auc(as.numeric(revDTM_sentiAffin_trn2a$hiLo), as.numeric(revDTM_predTrn_svm2_affin))
+#auc train 0.80
+auc(as.numeric(revDTM_sentiAffin_tst$hiLo), as.numeric(revDTM_predTst_svm2_affin))
+#auc test 0.78
+#building ROC curve
+pred_affin_svm2=prediction(as.numeric(revDTM_predTst_svm2_affin),as.numeric(revDTM_sentiAffin_tst$hiLo))
+aucPerf_svm2_affin <-performance(pred_affin_svm2, "tpr", "fpr")
+plot(aucPerf_svm2_affin) + abline(a=0, b= 1)
+```
+
+# Develop a model on broader set of terms (combining dictionary words)
+```{r message=FALSE, cache=TRUE}
+########
+rrSenti_bing1<- rrTokens %>% inner_join(get_sentiments("bing"), by="word")
+rrSenti_bing1 <- ungroup(rrSenti_bing1)
+rrSenti_bing1<-rrSenti_bing1%>% select(word)
+rrSenti_nrc1<-rrTokens %>% inner_join(get_sentiments("nrc"), by="word") 
+rrSenti_nrc1 <- ungroup(rrSenti_nrc1)
+rrSenti_nrc1<-rrSenti_nrc1%>% select(word)
+rrSenti_afinn1<- rrTokens %>% inner_join(get_sentiments("afinn"), by="word")
+rrSenti_afinn1 <- ungroup(rrSenti_afinn1)
+rrSenti_afinn1<-rrSenti_afinn1%>% select(word)
+Data_combined<-union(rrSenti_bing1,rrSenti_nrc1 )
+Data_combined1<-union(Data_combined,rrSenti_afinn1 )
+Data_combined1<-Data_combined1[!duplicated(Data_combined1), ]
+Data_combined2<-rrTokens %>% inner_join(Data_combined1, by="word")
+
+#dtm matrix
+revDTM_senticombined <- Data_combined2 %>%  pivot_wider(id_cols = c(review_id,stars), names_from = word, values_from = tf_idf)  %>% ungroup()
+#filter out the reviews with stars=3, and calculate hiLo sentiment 'class'
+revDTM_senticombined  <- revDTM_senticombined  %>% filter(stars!=3) %>% mutate(hiLo=ifelse(stars<=2, -1, 1)) %>% select(-stars)
+
+#how many review with 1, -1  'class'
+revDTM_senticombined  %>% group_by(hiLo) %>% tally()
+#develop a SVM to predict hiLo from the words in the reviews
+#replace all the NAs with 0
+revDTM_senticombined<-revDTM_senticombined %>% replace(., is.na(.), 0)
+
+library(rsample)
+revDTM_senticombined_split<- initial_split(revDTM_senticombined, 0.5)
+revDTM_senticombined_trn<- training(revDTM_senticombined_split)
+revDTM_senticombined_tst<- testing(revDTM_senticombined_split)
+
+#Splitting train again to get a subset for model
+revDTM_senticombined_trn1<-initial_split(revDTM_senticombined_trn, 0.70)
+revDTM_senticombined_trn2<- training(revDTM_senticombined_trn1)
+#10523 observations
+
+#model 
+svmM1_senticombined <- svm(as.factor(hiLo) ~., data = revDTM_senticombined_trn2 %>%select(-review_id),kernel="radial", cost=10,gamma=0.5, scale=FALSE)
+
+#prediction
+revDTM_predTrn_svm1_senticombined<-predict(svmM1_senticombined, revDTM_senticombined_trn2)
+mean(revDTM_predTrn_svm1_senticombined == revDTM_senticombined_trn2$hiLo)
+#accuracy train 0.95
+table(actual= revDTM_senticombined_trn2$hiLo, predicted= revDTM_predTrn_svm1_senticombined)
+#7771 correctly classified as true positives
+auc(as.numeric(revDTM_senticombined_trn2$hiLo), as.numeric(revDTM_predTrn_svm1_senticombined))
+#0.92train
+
+#predict test
+revDTM_predTst_svm1_senticombined<-predict(svmM1_senticombined, revDTM_senticombined_tst)
+mean(revDTM_predTst_svm1_senticombined == revDTM_senticombined_tst$hiLo)
+#accuracy test 0.89
+table(actual= revDTM_senticombined_tst$hiLo, predicted= revDTM_predTst_svm1_senticombined)
+#10780 correctly classified as true positives 
+auc(as.numeric(revDTM_senticombined_tst$hiLo), as.numeric(revDTM_predTst_svm1_senticombined))
+#0.82 test
+
+library(ROCR)
+#building ROC curve
+pred_svm1_senti_combined=prediction(as.numeric(revDTM_predTst_svm1_senticombined),as.numeric(revDTM_senticombined_tst$hiLo))
+aucPerf_svm1_senti_combined <-performance(pred_svm1_senti_combined, "tpr", "fpr")
+plot(aucPerf_svm1_senti_combined) + abline(a=0, b= 1)
+
+#Splitting train again to get a subset for model
+revDTM_senticombined_trn1a<-initial_split(revDTM_senticombined_trn, 0.75)
+revDTM_senticombined_trn2a<- training(revDTM_senticombined_trn1a)
+
+#Building SVM with different subset of training data
+svmM2_senticombined <- svm(as.factor(hiLo) ~., data = revDTM_senticombined_trn2a %>%select(-review_id),kernel="radial", cost=10,gamma=0.5, scale=FALSE)
+
+revDTM_predTrn_svm2_senticombined<-predict(svmM2_senticombined, revDTM_senticombined_trn2a)
+mean(revDTM_predTrn_svm2_senticombined == revDTM_senticombined_trn2a$hiLo)
+#accuracy train 0.95
+table(actual= revDTM_senticombined_trn2a$hiLo, predicted= revDTM_predTrn_svm2_senticombined)
+#8391 correctly classified as true positives
+auc(as.numeric(revDTM_senticombined_trn2a$hiLo), as.numeric(revDTM_predTrn_svm2_senticombined))
+#0.91 train
+
+#predict test
+revDTM_predTst_svm2_senticombined<-predict(svmM2_senticombined, revDTM_senticombined_tst)
+mean(revDTM_predTst_svm2_senticombined == revDTM_senticombined_tst$hiLo)
+#accuracy test 0.89
+table(actual= revDTM_senticombined_tst$hiLo, predicted= revDTM_predTst_svm2_senticombined)
+#10801 correctly classified as true positives 
+auc(as.numeric(revDTM_senticombined_tst$hiLo), as.numeric(revDTM_predTst_svm2_senticombined))
+#0.83 test
+
+library(ROCR)
+#building ROC curve
+pred_svm2_senti_combined=prediction(as.numeric(revDTM_predTst_svm2_senticombined),as.numeric(revDTM_senticombined_tst$hiLo))
+aucPerf_svm2_senti_combined <-performance(pred_svm2_senti_combined, "tpr", "fpr")
+plot(aucPerf_svm2_senti_combined) + abline(a=0, b= 1)
+```
